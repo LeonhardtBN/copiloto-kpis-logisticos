@@ -77,21 +77,36 @@ def test_bloqueia_comandos_perigosos(sql):
 
 # ---------- pipeline com um cliente falso ----------
 
+from google.genai import errors  # noqa: E402
+
+from copiloto.copiloto import ConsultaSQL  # noqa: E402
+
+
 class ClienteFalso:
-    """Imita `anthropic.Anthropic().messages`: devolve SQLs pré-definidos e um resumo."""
+    """Imita `genai.Client().models`: devolve SQLs pré-definidos e um resumo.
 
-    def __init__(self, sqls):
+    `falhas_429` = quantas chamadas seguidas devem falhar por limite de taxa antes de responder.
+    """
+
+    def __init__(self, sqls, falhas_429=0):
         self.sqls = list(sqls)
+        self.falhas_429 = falhas_429
         self.chamadas = []
-        self.messages = self
+        self.models = self
 
-    def create(self, **kwargs):
-        self.chamadas.append(kwargs)
-        if "tools" in kwargs:
-            bloco = SimpleNamespace(type="tool_use", id=f"t{len(self.chamadas)}",
-                                    input={"sql": self.sqls.pop(0), "explicacao": "teste"})
-            return SimpleNamespace(content=[bloco])
-        return SimpleNamespace(content=[SimpleNamespace(type="text", text="Resumo de teste.")])
+    def generate_content(self, *, model, contents, config):
+        self.chamadas.append({"model": model, "contents": list(contents), "config": config})
+        if self.falhas_429:
+            self.falhas_429 -= 1
+            raise errors.ClientError(429, {"error": {"code": 429, "message": "Quota exceeded", "status": "RESOURCE_EXHAUSTED"}})
+        if config.response_schema is ConsultaSQL:
+            consulta = ConsultaSQL(sql=self.sqls.pop(0), explicacao="teste")
+            return SimpleNamespace(parsed=consulta, text=consulta.model_dump_json())
+        return SimpleNamespace(parsed=None, text="Resumo de teste.")
+
+
+def _texto(conteudo):
+    return conteudo.parts[0].text
 
 
 def test_pipeline_feliz(con):
@@ -99,7 +114,8 @@ def test_pipeline_feliz(con):
     r = Copiloto(con, cliente=cliente).perguntar("Quantos pedidos por região?")
     assert r.erro is None and r.tentativas == 1
     assert len(r.dados) == 5 and r.resumo == "Resumo de teste."
-    assert "regiao_cliente" in cliente.chamadas[-1]["messages"][0]["content"]  # resumo recebe os dados
+    assert cliente.chamadas[0]["model"].startswith("gemini")
+    assert "regiao_cliente" in _texto(cliente.chamadas[-1]["contents"][0])  # resumo recebe os dados
 
 
 def test_pipeline_corrige_apos_erro(con):
@@ -110,14 +126,27 @@ def test_pipeline_corrige_apos_erro(con):
     ])
     r = Copiloto(con, cliente=cliente).perguntar("Total de pedidos?")
     assert r.erro is None and r.tentativas == 3 and len(r.historico_erros) == 2
-    feedback = cliente.chamadas[1]["messages"][-1]["content"][0]
-    assert feedback["type"] == "tool_result" and feedback["is_error"]
+    conversa = cliente.chamadas[1]["contents"]
+    assert [c.role for c in conversa] == ["user", "model", "user"]
+    assert "falhou" in _texto(conversa[-1])
 
 
 def test_pipeline_desiste_depois_do_limite(con):
     cliente = ClienteFalso(["DROP TABLE pedidos"] * 3)
     r = Copiloto(con, cliente=cliente).perguntar("Apague tudo")
     assert r.erro and r.dados is None and r.tentativas == 3
+
+
+def test_espera_e_tenta_de_novo_no_limite_do_plano_gratuito(con):
+    cliente = ClienteFalso(["SELECT COUNT(*) AS total FROM pedidos"], falhas_429=2)
+    r = Copiloto(con, cliente=cliente, esperas_limite_taxa=(0, 0)).perguntar("Total?")
+    assert r.erro is None and len(cliente.chamadas) == 4  # 2 falhas + SQL + resumo
+
+
+def test_limite_persistente_vira_erro(con):
+    cliente = ClienteFalso(["SELECT 1"], falhas_429=5)
+    with pytest.raises(errors.ClientError):
+        Copiloto(con, cliente=cliente, esperas_limite_taxa=(0, 0)).perguntar("Total?")
 
 
 # ---------- gráfico ----------

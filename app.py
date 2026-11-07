@@ -10,6 +10,7 @@ from pathlib import Path
 import altair as alt
 import streamlit as st
 from dotenv import load_dotenv
+from google.genai import errors as genai_errors
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 from copiloto import Copiloto, conectar, sugerir_grafico  # noqa: E402
@@ -37,8 +38,9 @@ st.title("Copiloto de KPIs Logísticos")
 st.caption("Pergunte em português sobre prazos, atrasos, frete e satisfação. "
            "A resposta vem com o SQL usado, a tabela e um gráfico.")
 
-if not os.getenv("ANTHROPIC_API_KEY"):
-    st.error("Defina ANTHROPIC_API_KEY no arquivo .env (veja .env.example).")
+if not os.getenv("GEMINI_API_KEY"):
+    st.error("Defina GEMINI_API_KEY no arquivo .env (veja .env.example). "
+             "A chave é gratuita: https://aistudio.google.com/apikey")
     st.stop()
 try:
     copiloto = carregar_copiloto(PASTA_DADOS)
@@ -62,7 +64,15 @@ pergunta = st.text_input("Sua pergunta", key="pergunta",
 
 if pergunta:
     with st.spinner("Gerando a consulta e analisando os dados..."):
-        resposta = copiloto.perguntar(pergunta)
+        try:
+            resposta = copiloto.perguntar(pergunta)
+        except genai_errors.APIError as e:
+            if e.code == 429:
+                st.error("O limite gratuito do Gemini foi atingido. Espere um minuto e pergunte de novo "
+                         "(o limite diário reinicia à meia-noite do horário do Pacífico).")
+            else:
+                st.error(f"Erro na Gemini API ({e.code}). Confira a GEMINI_API_KEY no .env.")
+            st.stop()
 
     if resposta.erro:
         st.error(resposta.erro)
