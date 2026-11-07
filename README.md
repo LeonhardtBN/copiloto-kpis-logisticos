@@ -4,8 +4,6 @@ Assistente que responde perguntas de operações em português ("quais regiões 
 
 Construído sobre o [dataset público de e-commerce brasileiro da Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) (~100 mil pedidos de 2016 a 2018).
 
-> 📸 _Coloque aqui um GIF ou print do app respondendo uma pergunta._
-
 ## O problema
 
 Em operações logísticas, a maioria das perguntas do dia a dia ("o atraso piorou este mês?", "qual estado tem o pior prazo?") vira um pedido para alguém escrever SQL. O copiloto reduz esse ciclo de horas para segundos, sem abrir mão de transparência: toda resposta mostra exatamente como foi calculada.
