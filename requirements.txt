@@ -1,0 +1,8 @@
+anthropic>=0.40
+duckdb>=1.1
+sqlglot>=25.0
+pandas>=2.0
+streamlit>=1.46
+altair>=5.0
+python-dotenv>=1.0
+pytest>=8.0

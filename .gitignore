@@ -1,0 +1,7 @@
+.env
+__pycache__/
+.pytest_cache/
+*.duckdb
+data/olist/
+data/amostra/
+.venv/
